@@ -65,3 +65,6 @@ typings/
 
 # Variables
 variables.env
+oldYml.yml
+oldYml.js
+oldHandler.js

@@ -19,24 +19,21 @@ functions:
           method: post
           cors: true
 
-  #creates a Split
-  createSplit:
-    handler: handler.createSplit
+  createRunner:
+    handler: handler.createRunner
     events:
       - http:
-          path: data/split
+          path: data/runner
           method: post
           cors: true
 
-  #returns event data
-  getEvent:
-    handler: handler.getEvent
+  createRunners:
+    handler: handler.createRunners
     events:
       - http:
-          path: data/event/{id} # path will be domain.name.com/dev/notes/1
-          method: get
+          path: data/runners
+          method: post
           cors: true
-
   getAll:
     handler: handler.getAll
     events:
@@ -44,71 +41,14 @@ functions:
           path: data/ # path will be domain.name.com/dev/notes/1
           method: get
           cors: true
+
+  deleteAll:
+    handler: handler.deleteAll
+    events:
+      - http:
+          path: data/ # path will be domain.name.com/dev/notes/1
+          method: delete
+          cors: true          
     
-  #returns all Split's in a given checkpoint
-  getCheckpoint:
-    handler: handler.getCheckpoint # path will be domain.name.com/dev/notes
-    events:
-      - http:
-          path: data/checkpoint/
-          method: get
-          cors: true
-  
-  #updates time of a Split
-  updateSplit:
-    handler: handler.updateSplit # path will be domain.name.com/dev/notes/1
-    events:
-      - http:
-          path: data/split/
-          method: put
-          cors: true
-
-  #updates multiple Splits for a single checkpoint
-  bulkUpdateSplits:
-    handler: handler.bulkUpdateSplits
-    events:
-      - http:
-          path: data/split/bulk
-          method: put
-          cors: true
-
-  #updates Event/{id}
-  startEvent:
-    handler: handler.startEvent
-    events:
-      - http:
-          path: data/event/start
-          method: put
-          cors: true
-
-  #resets the 'startTime' field on the Event, 
-  #then deletes all 'Split's with an eventID of {id}
-  restartEvent:
-    handler: handler.restartEvent
-    events:
-      - http:
-          path: data/event/restart/ # path will be domain.name.com/dev/notes/1
-          method: delete
-          cors: true
-
-  #delete a single Split
-  deleteSplit:
-    handler: handler.deleteSplit
-    events:
-      - http:
-          path: data/split/
-          method: delete
-          cors: true
-
-
-  #delete a single event
-  deleteEvent:
-    handler: handler.deleteEvent
-    events:
-      - http:
-          path: data/event/
-          method: delete
-          cors: true
-
 plugins:
 - serverless-offline # adding the plugin to be able to run the offline emulation

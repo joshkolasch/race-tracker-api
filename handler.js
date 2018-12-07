@@ -7,33 +7,87 @@ let generateTimestamp = Utils.generateTimestamp
 require('dotenv').config({ path: './variables.env'})
 'use strict';
 
-//TODO: I probably want to return the entire checkpoint under most circumstances in order to maintain
-//integrity on the app side, but how do I avoid doing wasteful gets?
-
 
 /*
-  eventID: 2305,
-  name: 'Sunny Hills Relay',
-  numRunners: 15,
-  numCheckpoints: 10,
-  startTime: 1541581769928 
-  */
+Event: {
+  _id: 1234,
+  type: 'event',
+  lastModified: 123456789
+  body: {
+    name: 'Sunny Hills Relay',
+    unitOfMeasure: 'kilometers',
+    timezone: 'mountain',
+    totalDistance: 55.3,
+    heats: {
+      'Key1': {
+        name: '50K slow starters',
+        startTime: 11:00AM
+      },
+      'Key2': {
+        name: '50K fast starters',
+        startTime: 11:30AM
+      }
+    }
+    checkpoints: {
+      'Key1': {
+        name: 'Red Hollow Aid Station 1',
+        distance: '4.5 K',
+        difficulty: 'moderate',
+        coordinates: {
+          latitude: 40.741895,
+          longitude: -73.989308
+        }
+      },
+      'Key2': {
+        name: 'office',
+        distance: '2.2K',
+        difficulty: 'hard',
+        coordinates: {
+          latitude: 40.741890,
+          longitude: -73.989300
+        }
+      }
+    }
+    runners: [
+      123456790,
+      123456791,
+      123456792
+    ]
+  }
+}
+Runner {
+  _id: 123456790,
+  type: 'runner',
+  lastModified: 12341234,
+  body: {
+    name: 'Jay Jamison',
+    eventID: 123456789
+    bib: 001,
+    splits: {
+      'Key1': '12:15AM',
+      'Key2': '12:45AM'
+    }
+  }
+}
+*/
 
-//DONE
 module.exports.createEvent = (event, context, callback) => {
   context.callbackWaitsForEmptyEventLoop = false
 
   connectToDatabase()
     .then(() => {
-      let { name, numRunners, numCheckpoints, } = JSON.parse(event.body)
-      //const id = 'event::' + generateID()
+      let { name, timezone, unitOfMeasure, totalDistance, checkpoints, heats, runners } = JSON.parse(event.body)
+      console.log('event body', event.body)
+      name = validateString(name)
+      if(name === null) {callback(null, {statusCode: 500, headers: { 'Content-type': 'text/plain'}, body: 'Invalid Name'})}
+      timezone = validateTimezone(timezone)
+      if(timezone === null) {callback(null, {statusCode: 500, headers: { 'Content-type': 'text/plain'}, body: 'Invalid Timezone'})}
+      unitOfMeasure = validateUnitOfMeasure(unitOfMeasure) 
+      totalDistance = validateNumber(totalDistance) 
+      validateCheckpoints(checkpoints) ? null : callback(null, {statusCode: 500, headers: { 'Content-type': 'text/plain'}, body: 'Invalid Checkpoint'})
+      validateHeats(heats) ? null : callback(null, {statusCode: 500, headers: { 'Content-type': 'text/plain'}, body: 'Invalid Heats'})
+      validateRunners(runners) ? null : callback(null, {statusCode: 500, headers: { 'Content-type': 'text/plain'}, body: 'Invalid Runners'})
       const _id = generateID()
-      if(typeof(numRunners !== 'number')) {
-        numRunners = Number(numRunners)
-      }
-      if(typeof(numCheckpoints !== 'number')) {
-        numCheckpoints = Number(numCheckpoints)
-      }
 
       const newEvent = {
         _id,
@@ -41,18 +95,38 @@ module.exports.createEvent = (event, context, callback) => {
         lastModified: generateTimestamp(),
         body: {
           name,
-          numRunners,
-          numCheckpoints,
-          startTime: ''
+          timezone,
+          unitOfMeasure,
+          totalDistance,
+          checkpoints: { ...checkpoints },
+          heats: { ...heats },
+          runners: []
         }
       }
-      //console.log('newEvent', newEvent)
 
       Data.create(newEvent)
-        .then(result => callback(null, {
-          statusCode: 200,
-          body: JSON.stringify(result)
-        }))
+        .then(result => {
+          /*let runnersToAdd = []
+
+          for(runner in runners) {
+            runnersToAdd.push(addRunner(runner, _id))
+          }
+
+          Promise.all(runnersToAdd)
+            .then(runnerResults => callback(null, {
+              statusCode: 200,
+              body: JSON.stringify(result)
+            }))
+            .catch(err => callback(null, {
+              statusCode: err.statusCode || 500,
+              headers: { 'Content-type': 'text/plain' },
+              body: 'Error adding runners'
+            }))
+          */
+         console.log('result', result)
+         return callback(null, successResponse(200, result))
+
+        })
         .catch(err => callback(null, {
           statusCode: err.statusCode || 500,
           headers: { 'Content-type': 'text/plain' },
@@ -61,437 +135,221 @@ module.exports.createEvent = (event, context, callback) => {
     })
 }
 
-/*
-1: {
-        runnerID: 1201,
-        runnerNumber: 1,
-        split: '10:20',
-        lastModified: 1540084649946,
-      },
-*/
 
-
-//DONE
-module.exports.createSplit = (event, context, callback) => {
+module.exports.createRunner = (event, context, callback) => {
   context.callbackWaitsForEmptyEventLoop = false
 
   connectToDatabase()
     .then(() => {
-      let { eventID, checkpoint, runnerNumber, split } = JSON.parse(event.body)
-      //const id = 'split::' + generateID()
-      const _id = generateID()
-      if(typeof(checkpoint !== 'number')) {
-        checkpoint = Number(checkpoint)
-      }
-      if(typeof(runnerNumber !== 'number')) {
-        runnerNumber = Number(runnerNumber)
-      }
-      if(typeof(split !== 'number')) {
-        split = Number(split)
-      }
+      let { eventID, runner } = JSON.parse(event.body)
+      //TODO: validateRunner & eventID
+      //if(!validateID(eventID)) {callback(null, errorResponse(null, 'Invalid Event ID'))}
+      //if(!validateRunner(runner)) {callback(null, errorResponse(null, 'Invalid Runner'))}
 
-      let findEvent = () => (
-        Data.find({_id: eventID}).exec()
-      )
-
-      let findSplit = () => {
-        const conditions = {
-          type: 'split',
-          'body.eventID': eventID,
-          'body.checkpoint': checkpoint,
-          'body.runnerNumber': runnerNumber
-        }
-
-        return Data.find(conditions).exec()
-      }
-
-      //NOTE: the promise will return [[findEventObject], [findSplitObject]]
-      Promise.all([
-        findEvent(),
-        findSplit()
-      ])
-      .then(results => {
-        console.log('results', results)
-        const resultEvent = results[0][0]
-        const resultSplit = results[1][0]
-        console.log('event', resultEvent)
-        console.log('split', resultSplit)
-
-        //case 1: event hasn't started yet
-        if(!resultEvent.body.startTime) {
-          callback(null, {
-            statusCode: 400,
-            body: JSON.stringify(resultEvent),
-            msg: 'The event has not started yet.'
-          })
-        }
-
-        //case 2: split already exists
-        else if (resultSplit) {
-          callback(null, {
-            statusCode: 400,
-            body: JSON.stringify(resultSplit),
-            msg: 'A split already exists for this runner at this checkpoint.'
-          })
-        }
-
-        //create the split
-        else {
-          const newSplit = {
-            _id,
-            type: 'split',
-            lastModified: generateTimestamp(),
-            body: {
-              eventID, 
-              checkpoint,
-              runnerNumber,
-              split
-            }
-          }
-          Data.create(newSplit)
-            .then(data => callback(null, {
-              statusCode: 200,
-              body: JSON.stringify(data)
-            }))
-            .catch(err => callback(null, {
-              statusCode: err.statusCode || 500,
-              headers: { 'Content-type': 'text/plain' },
-              body: 'Could not create split.'
-            }))
-        }
-      })
-      .catch(err => callback(null, {
-        statusCode: err.statusCode || 500,
-        headers: { 'Content-type': 'text/plain' },
-        body: 'Could not validate split.'
-      }))
-    })
-
+      const eventCondition = {_id: eventID, type: 'event'}
       
-}
+      Data.findOne(eventCondition)
+        .then(results => {
+          const eventResults = results._doc
 
-//DONE
-module.exports.getEvent = (event, context, callback) => {
-  context.callbackWaitsForEmptyEventLoop = false
+          const duplicateCheck = eventResults.body.runners.filter((item) => item.bib === runner.bib)
+          console.log('duplicateCheck: ', duplicateCheck)
 
-  connectToDatabase()
-    .then(() => {
-      Data.findById(event.pathParameters.id)
-        .then(data => callback(null, {
-          statusCode: 200,
-          body: JSON.stringify(data)
-        }))
-        .catch(err => callback(null, {
-          statusCode: err.statusCode || 500,
-          headers: { 'Context-Type': 'text/plain' },
-          body: 'Could not fetch event.'
-        }))
-    })
-}
+          if (duplicateCheck.length > 0) 
+          {
+            return callback(null, errorResponse(501, 'Runner already exists')) 
+          }
+          else if (!eventResults.body.heats.hasOwnProperty(runner.heat))
+          {
+            return callback(null, errorResponse(501, 'Heat does not exist in event'))
+          }
+          else {
+            const newRunner = generateRunner(runner, eventID)
+            //console.log('new runner', newRunner)
 
-//DONE
-module.exports.getCheckpoint = (event, context, callback) => {
-  context.callbackWaitsForEmptyEventLoop = false
-  
-  connectToDatabase()
-    .then(() => {
-      const { eventID } = event.queryStringParameters
-      const checkpoint = Number(event.queryStringParameters.checkpoint)
-      //console.log('event', event)
-      //console.log('eventID', eventID)
-      //console.log('checkpoint', checkpoint)
-      //console.log('typeof checkpoint', typeof(checkpoint))
+            let addRunnerToDatabase = () => (
+              Data.create(newRunner)
+            ) 
 
-      //NOTE: I think a better way to find is to pass it the following
-      /*
-        {
-          type: 'split',
-          'body.eventID': eventID,
-          'body.checkpoint': checkpoint
-        }
-      */
-      Data.find({
-        $and: [
-          {type: 'split'},
-          {"body.eventID": eventID},
-          {"body.checkpoint": checkpoint}
-        ]
-      })
-        .then(data => callback(null, {
-          statusCode: 200,
-          body: JSON.stringify(data)
-        }))
-        .catch(err => callback(null, {
-          statusCode: err.statusCode || 500,
-          headers: { 'Context-Type': 'text/plain' },
-          body: 'Could not fetch checkpoint.' 
-        }))
-    })
-}
-
-//DONE
-module.exports.startEvent = (event, context, callback) => {
-  context.callbackWaitsForEmptyEventLoop = false
-
-  connectToDatabase()
-    .then(() => {
-      let { startTime, eventID, lastModified } = JSON.parse(event.body)
-      if(typeof(startTime) !== 'number'){
-        startTime = Number(startTime)
-      }
-      if(typeof(lastModified) !== 'number'){
-        lastModified = Number(lastModified)
-      }
-
-        Data.findOne({_id: eventID})
-          .then(data => {
-            const updateInfo = {
-              lastModified: generateTimestamp(),
-              body: {
-                ...data.body,
-                startTime
+            let updateEvent = () => {
+              const updateCondition = {
+                _id: eventID,
+                type: 'event'
               }
+              const updateInfo = {
+                ...eventResults,
+                lastModified: generateTimestamp(),
+                body: {
+                  ...eventResults.body,
+                  runners: [
+                    ...eventResults.body.runners,
+                    {
+                      _id: newRunner._id,
+                      bib: newRunner.body.bib
+                    }
+                    
+                  ]
+                }
+              }
+              const options = {
+                new: true
+              }
+              return Data.findOneAndUpdate(updateCondition, updateInfo, options)
             }
-            //console.log('preparing to update, updateInfo is ->', updateInfo)
 
-            //new: true returns the new updated document
-            Data.findOneAndUpdate({_id: eventID}, updateInfo, {new: true})
-              .then(updateData => callback(null, {
-                statusCode: 200,
-                body: JSON.stringify(updateData)
-              }))
-              .catch(err => callback(null, {
-                statusCode: err.statusCode || 500,
-                headers: { 'Context-Type': 'text/plain' },
-                body: 'Could not update after start event.' 
-              }))
-          })
-          .catch(err => callback(null, {
-            statusCode: err.statusCode || 500,
-            headers: { 'Context-Type': 'text/plain' },
-            body: 'Could not find your event.' 
-          }))
+            Promise.all([
+              addRunnerToDatabase(),
+              updateEvent()
+            ])
+              .then(secondResults => {
+                const addResults = secondResults[0]._doc
+                const updateResults = secondResults[1]._doc
+                //console.log('add results', addResults)
+                //console.log('update event results', updateResults)
+                newResponse = {
+                  event: {
+                    ...updateResults
+                  },
+                  runner: {
+                    ...addResults
+                  }
+                }
+                return callback(null, successResponse(200, newResponse))
+              })
+              .catch(err => callback(null, errorResponse(err.statusCode, 'Could not add runner to database')))
+          }
+        })
+        .catch(err => callback(null, errorResponse(err.statusCode, 'Unable to find event')))
     })
 }
 
-//TODO: DONE
-module.exports.restartEvent = (event, context, callback) => {
+
+module.exports.createRunners = (event, context, callback) => {
   context.callbackWaitsForEmptyEventLoop = false
 
   connectToDatabase()
     .then(() => {
-      console.log('event', event)
-      let { eventID, lastModified } = event.queryStringParameters
-      if(typeof(lastModified) !== 'number'){
-        lastModified = Number(lastModified)
-      }
-      const conditions = {
-        _id: eventID,
-        type: 'event',
-        lastModified
+      let { eventID, runners } = JSON.parse(event.body)
+      //TODO: validate eventID
+      //TODO: validate runners
+      //TODO: check to make sure none of the runners have duplicate bib #'s [check #1]
+      let findEvent = () => {
+        const eventCondition = {_id: eventID, type: 'event'}
+        return Data.findOne(eventCondition)
       }
 
-      Data.findOne(conditions)
-        .then(data => {
-          const updateInfo = {
-            ...data,
-            lastModified: generateTimestamp(),
-            body: {
-              ...data.body,
-              startTime: ''
+      findEvent()
+        .then(result => {
+          const resultEvent = result._doc
+          //return results, plus the runners that were duplicate(and thus not added, from both checks)
+          let validRunners = []
+          let invalidRunners = []
+          /*const eventBibs = resultEvent.body.runners.reduce((accumulator, currentRunner, index) => {
+            accumulator[currentRunner.bib] = 1
+          }, {})*/
+
+          let eventBibs = {}
+          for (let i = 0; i < resultEvent.body.runners.length; i++) {
+            //console.log(resultEvent.body.runners[i])
+            eventBibs[resultEvent.body.runners[i].bib] = 1
+          }
+          
+          let allBibs = {}
+
+          //console.log('eventBibs', eventBibs)
+
+          for (let i = 0; i < runners.length; i++) {
+            /*
+            //NOTE: this check should be done first! do it becore allBibs.hasOwnProperty(runner.bib)
+            if (!isValidRunner(runner)) {
+              invalidRunners.push({
+                ...runner,
+                errMessage: 'Invalidly formatted runner'
+              }) 
+            }
+            else if (stuff below)*/
+           if(allBibs.hasOwnProperty(runners[i].bib)) {
+              invalidRunners.push({
+                ...runners[i],
+                errMessage: 'User submitted runners with duplicate bib'
+              })
+            }
+            
+            else if(eventBibs.hasOwnProperty(runners[i].bib)) {
+              invalidRunners.push({
+                ...runners[i],
+                errMessage: 'Bib already taken by an existing runner.'
+              })
+            }
+            else {
+              validRunners.push(runners[i])
+            }
+            allBibs[runners[i].bib] = 1
+          }
+
+          //console.log('valid runners', validRunners)
+          //console.log('all bibs', allBibs)
+
+          const formattedRunners = validRunners.map(runner => generateRunner(runner, resultEvent._id))
+          let runnersToAdd = formattedRunners.map(runner => {
+            return Data.create(runner)
+          })
+          //console.log('formatted runners: ', formattedRunners)
+
+          //can i replace ...runnersToAdd with formattedRunners.map(runner=>{}) ??? to reduce memory complexity
+          Promise.all([...runnersToAdd])
+            .then(addResults => {
+              console.log('Add Results: ', addResults)
+              const addedRunners = addResults.map(item => ({
+                _id: item._id,
+                bib: item.body.bib
+              }))
+              console.log('added Runners', addedRunners)
+
+              const updateValues = {
+                lastModified: generateTimestamp(),
+                '$push': {
+                  'body.runners': {'$each': addedRunners}
+                }
+              }
+
+              const condition = {
+                _id: resultEvent._id, 
+                type: 'event', 
+              }
+
+              const options = {new: true}
+              //return callback(null, successResponse(200, 'Great'))
               
-            }
-          }
+              Data.findOneAndUpdate(condition, updateValues, options)
+                .then(updateResults => {
+                  console.log('updated Event', updateResults)
+                  const response = {
+                    event: {
+                      ...updateResults._doc
+                    },
+                    runners: {
+                      ...formattedRunners
+                    },
+                    invalidRunners: {
+                      ...invalidRunners
+                    }
+                  }
+                  return callback(null, successResponse(200, response))
 
-          //new: true returns the new updated document
-          Data.findOneAndUpdate(conditions, updateInfo, {new: true})
-            .then(updateData => {
-              const deleteConditions = {
-                type: 'split',
-                'body.eventID': eventID
-              }
-              Data.deleteMany(deleteConditions)
-                .then(deleteData => callback(null, {
-                  statusCode: 200,
-                  body: JSON.stringify(updateData)
-                }))
-                .catch(err => callback(null, {
-                  statusCode: err.statusCode || 500,
-                  headers: { 'Context-Type': 'text/plain' },
-                  body: 'Could not delete splits after restartEvent.' 
-                }))
+                })
+                .catch(err => callback(null, errorResponse(err.statusCode, 'Could not update event')))
+
             })
+            .catch(err => callback(null, errorResponse(err.statusCode, 'Error adding runners')))
+
         })
-        .catch(err => callback(null, {
-          statusCode: err.statusCode || 500,
-          headers: { 'Context-Type': 'text/plain' },
-          body: 'Could not restart event.' 
-        }))
-    })
-}
+        .catch(err => callback(null, errorResponse(err.statusCode, 'Could not find event')))
 
-//TODO: test
-module.exports.updateSplit = (event, context, callback) => {
-  context.callbackWaitsForEmptyEventLoop = false
-
-  connectToDatabase()
-    .then(() => {
-      let { id, split, lastModified } = JSON.parse(event.body)
-      if(typeof(split) !== 'number'){
-        split = Number(split)
-      }
-      if(typeof(lastModified) !== 'number'){
-        lastModified = Number(lastModified)
-      }
       
-      const conditions = {
-        _id: id,
-        type: 'split',
-        'body.lastModified': lastModified
-      }
-
-      Data.findOne(conditions)
-        .then(data => {
-          const updateInfo = {
-            ...data,
-            lastModified: generateTimestamp(),
-            body: {
-              ...data.body,
-              split
-            }
-          }
-          Data.findOneAndUpdate(conditions, updateInfo, {new: true})
-            .then(updateData => callback(null, {
-              statusCode: 200,
-              body: JSON.stringify(updateData)
-            }))
-            .catch(err => callback(null, {
-              statusCode: err.statusCode || 500,
-              headers: { 'Context-Type': 'text/plain' },
-              body: 'Could not update split. Resource probably modified during update request' 
-            }))
-        })
-        .catch(err => callback(null, {
-          statusCode: err.statusCode || 500,
-          headers: { 'Context-Type': 'text/plain' },
-          body: 'Could not update split.' 
-        }))
     })
 }
 
-//TODO: test
-module.exports.deleteSplit = (event, context, callback) => {
-  context.callbackWaitsForEmptyEventLoop = false
-
-  connectToDatabase()
-    .then(() => {
-      let { id, lastModified } = event.queryStringParameters
-      if(typeof(lastModified) !== 'number'){
-        lastModified = Number(lastModified)
-      }
-      const conditions = {
-        _id: id,
-        type: 'split',
-        'body.lastModified': lastModified
-      }
-      console.log('lastModified is', lastModified)
-      console.log('conditions', conditions)
-
-      Data.findOneAndDelete(conditions)
-        .then(data => callback(null, {
-          statusCode: 200,
-          body: JSON.stringify(data)
-        }))
-        .catch(err => callback(null, {
-          statusCode: err.statusCode || 500,
-          headers: { 'Context-Type': 'text/plain' },
-          body: 'Could not delete split.', 
-        }))
-    })
-}
-
-//TODO: test
-module.exports.deleteEvent = (event, context, callback) => {
-  context.callbackWaitsForEmptyEventLoop = false
-
-  connectToDatabase()
-    .then(() => {
-      let { eventID, lastModified } = event.queryStringParameters
-      if(typeof(lastModified) !== 'number') {
-        lastModified = Number(lastModified)
-      }
-
-      const conditions = {
-        _id: eventID,
-        type: 'event',
-        lastModified
-      }
-      console.log(conditions)
-
-      Data.findOneAndDelete(conditions)
-        .then(data => {
-          const deleteConditions = {
-            type: 'split',
-            'body.eventID': eventID
-          }
-          Data.deleteMany(deleteConditions)
-            .then(deleteData => callback(null, {
-              statusCode: 200,
-              body: JSON.stringify(deleteData)
-            }))
-            .catch(err => callback(null, {
-              statusCode: err.statusCode || 500,
-              headers: { 'Context-Type': 'text/plain' },
-              body: 'Could not delete splits after restartEvent.' 
-            }))
-        })
-        .catch(err => callback(null, {
-          statusCode: err.statusCode || 500,
-          headers: { 'Context-Type': 'text/plain' },
-          body: 'Could not delete split.', 
-        }))
-    })
-}
-
-/*
-splits: [
-  {
-    id,
-    runnerNumber,
-    split,
-    lastModified
-  },
-  { }
-]
-*/
-
-//TODO: test [deal with later]
-//currently exploitable, fix first parameter of update()
-module.exports.bulkUpdateSplits = (event, context, callback) => {
-  context.callbackWaitsForEmptyEventLoop
-
-  connectToDatabase()
-    .then(() => {
-      const { eventID, checkpoint, splits } = JSON.parse(event.body)
-
-      Data.update(
-        {_id: {$in: splits.id}},
-        {$set: {'body.lastModified': generateTimestamp(), split: splits.split}},
-        {"multiple": true}
-      ).then(data => callback(null, {
-          statusCode: 200,
-          body: JSON.stringify(data)
-        }))
-        .catch(err => callback(null, {
-          statusCode: err.statusCode || 500,
-          headers: { 'Context-Type': 'text/plain' },
-          body: 'Could not bulk update splits.', 
-        }))
-
-    })
-}
-
-//DONE
 module.exports.getAll = (event, context, callback) => {
   context.callbackWaitsForEmptyEventLoop = false
 
@@ -509,3 +367,122 @@ module.exports.getAll = (event, context, callback) => {
         }))
     })
 }
+
+module.exports.deleteAll = (event, context, callback) => {
+  context.callbackWaitsForEmptyEventLoop = false
+
+  connectToDatabase()
+    .then(() => {
+      Data.remove({})
+        .then(deleteData => callback(null, successResponse(200, deleteData)))
+    })
+}
+
+//TODO: populateRunners() {}
+//TODO: addHeat () {}
+//TODO: removeHeat() {}
+//TODO: updateHeat() {}
+//TODO: addRunner() {}
+//TODO: deleteRunner() {}
+//TODO: updateRunner() {}
+
+
+
+
+function validateString (input) {
+  if (typeof(input) !== 'string')
+  {
+    return null
+  }
+  return input
+}
+
+function validateTimezone (input) {
+  return input
+}
+
+function validateUnitOfMeasure (input) {
+  const UNITS = ['kilometers', 'meters', 'miles', 'feet']
+
+  if(!input) {
+    return ''
+  }
+
+  if(!UNITS.includes(input)) {
+    return ''
+  }
+  return input
+}
+
+function validateNumber (input) {
+  return input
+}
+
+function validateCheckpoints (input) {
+  return true
+}
+
+function validateHeats (input) {
+  return true
+}
+
+function validateRunners (input) {
+  return true
+}
+
+function generateRunner (runner, eventID) {
+  const { name, bib, heat } = runner
+
+  const newRunner = {
+    _id: generateID(),
+    type: 'runner', 
+    lastModified: generateTimestamp(),
+    body: {
+      eventID,
+      name,
+      bib,
+      heat,
+      splits: null
+    }
+  }
+  return newRunner
+}
+
+function errorResponse(statusCode, errorMessage) {
+  return {
+    statusCode: statusCode || 500,
+    headers: { 'Context-Type': 'text/plain' },
+    body: errorMessage 
+  }
+}
+
+function successResponse(statusCode, body) {
+  return {
+    statusCode: statusCode || 200,
+    body: JSON.stringify(body)
+  }
+}
+
+//function addRunner(runner, eventID)
+
+//find duplicates 
+/*
+let findDuplicateRunners = runners.map((runner) => {
+  const duplicateFilter = {
+    type: 'runner',
+    'body.eventID': eventID,
+    'body.bib': runner.bib
+  }
+  return Data.countDocuments(duplicateFilter)
+})
+//console.log('dup runners array', findDuplicateRunners)
+
+Promise.all(findDuplicateRunners)
+  .then(results => {
+    console.log('Results:\n', results)
+    console.log('R[0]:\n', results[0])
+    console.log('R[1]:\n', results[1])
+    return callback(null, successResponse(200, results[0]))
+  })
+  .catch(err => callback(null, errorResponse(err.statusCode, 'Could not find duplicates')))
+*/
