@@ -6,6 +6,6 @@ const RTSchema = new mongoose.Schema({
   type: String,
   lastModified: Number,
   body: mongoose.Schema.Types.Mixed
-})
+}, {minimize: false})
 
 module.exports = mongoose.model('Data', RTSchema)

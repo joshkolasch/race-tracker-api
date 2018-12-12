@@ -19,12 +19,12 @@ functions:
           method: post
           cors: true
 
-  createRunner:
-    handler: handler.createRunner
+  getRunners:
+    handler: handler.getRunners
     events:
       - http:
-          path: data/runner
-          method: post
+          path: data/runners
+          method: get
           cors: true
 
   createRunners:
@@ -34,6 +34,7 @@ functions:
           path: data/runners
           method: post
           cors: true
+
   getAll:
     handler: handler.getAll
     events:
@@ -48,7 +49,39 @@ functions:
       - http:
           path: data/ # path will be domain.name.com/dev/notes/1
           method: delete
-          cors: true          
+          cors: true     
+
+  addHeats:
+    handler: handler.addHeats
+    events:
+      - http:
+          path: data/event/heats/add
+          method: put
+          cors: true     
+
+  removeHeats:
+    handler: handler.removeHeats
+    events:
+      - http:
+          path: data/event/heats/remove
+          method: put
+          cors: true
+
+  addCheckpoints:
+    handler: handler.addCheckpoints
+    events:
+      - http:
+          path: data/event/checkpoints/add
+          method: put
+          cors: true
+
+  removeCheckpoints:
+    handler: handler.removeCheckpoints
+    events:
+      - http:
+          path: data/event/checkpoints/remove
+          method: put
+          cors: true
     
 plugins:
 - serverless-offline # adding the plugin to be able to run the offline emulation
