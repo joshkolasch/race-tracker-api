@@ -354,7 +354,7 @@ module.exports.addHeats = (event, context, callback) => {
           }
 
           const options = { new: true }
-
+          
           //update the Event
           Data.findOneAndUpdate(conditions, updateValues, options)
             .then(updateResults => {
@@ -394,70 +394,96 @@ module.exports.removeHeats = (event, context, callback) => {
       findEvent(eventID)
         .then(result => {
           const resultEvent = result._doc
-          let validHeats = {}
-          let invalidHeatIDs = []
-          
-          //sort valid heats from invalid heats
-          heatIDs.forEach(id => {
-            if(!validID(id)) {
-              invalidHeatIDs.push({
-                id,
-                errMessage: 'Invalid heat ID'
-              })
+
+          //find runners and make sure that none of them belong to a heat that is about to be removed
+          let runnersToFind = resultEvent.body.runners.map(runner => {
+            const conditions = {
+              _id: runner._id,
+              type: 'runner'
             }
-            else if(!resultEvent.body.heats.hasOwnProperty(id)) {
-              invalidHeatIDs.push({
-                id,
-                errMessage: 'Heat not found in event'
-              })
-            }
-            else if(validHeats.hasOwnProperty(id)) {
-              invalidHeatIDs.push({
-                id,
-                errMessage: 'User submitted duplicate heat IDs'
-              })
-            }
-            else {
-              validHeats[id] = 1
-            }
+            //TODO: this is a good opportunity to use the Select option and only return the 'runner.body.heat' field
+            return Data.findOne(conditions)
           })
 
-          //escape early if there are no valid heats
-          if(Object.keys(validHeats).length < 1) {
-            const response = {
-              errMessage: 'No valid Heats to be removed',
-              invalidHeatIDs
-            }
-            return callback(null, errorResponse(501, response))
-          }
+          Promise.all(runnersToFind)
+            .then(foundRunners => {
+              let eventHeats = {} //heats that runners currently belong to
+              let validHeats = {}
+              let invalidHeatIDs = []
 
-          //newHeats object that will hold the existing heats, but remove the valid heats
-          let newHeats = {}
-          for(let heat in resultEvent.body.heats) {
-            if(!validHeats.hasOwnProperty(heat)) {
-              newHeats[heat] = resultEvent.body.heats[heat]
-            }
-          }
+              foundRunners.forEach(runner => {
+                eventHeats[runner.body.heat] = 1
+              })
+              
+              //sort valid heats from invalid heats
+              heatIDs.forEach(id => {
+                if(!validID(id)) {
+                  invalidHeatIDs.push({
+                    id,
+                    errMessage: 'Invalid heat ID'
+                  })
+                }
+                else if(!resultEvent.body.heats.hasOwnProperty(id)) {
+                  invalidHeatIDs.push({
+                    id,
+                    errMessage: 'Heat not found in event'
+                  })
+                }
+                else if(validHeats.hasOwnProperty(id)) {
+                  invalidHeatIDs.push({
+                    id,
+                    errMessage: 'User submitted duplicate heat IDs'
+                  })
+                }
+                else if(eventHeats.hasOwnProperty(id)) {
+                  invalidHeatIDs.push({
+                    id,
+                    errMessage: 'Cannot remove a heat that still has runners associated with it'
+                  })
+                }
+                else {
+                  validHeats[id] = 1
+                }
+              })
 
-          const conditions = { _id: eventID, type: 'event' }
-
-          const updateValues = {
-            lastModified: generateTimestamp(),
-            'body.heats': newHeats
-          }
-
-          const options = { new: true }
-
-          //update the Event
-          Data.findOneAndUpdate(conditions, updateValues, options)
-            .then(updateResults => {
-              const response = {
-                'event': updateResults._doc,
-                invalidHeatIDs
+              //escape early if there are no valid heats
+              if(Object.keys(validHeats).length < 1) {
+                const response = {
+                  errMessage: 'No valid Heats to be removed',
+                  invalidHeatIDs
+                }
+                return callback(null, errorResponse(501, response))
               }
-              return callback(null, successResponse(200, response))
+
+              //newHeats object that will hold the existing heats, but remove the valid heats
+              let newHeats = {}
+              for(let heat in resultEvent.body.heats) {
+                if(!validHeats.hasOwnProperty(heat)) {
+                  newHeats[heat] = resultEvent.body.heats[heat]
+                }
+              }
+
+              const conditions = { _id: eventID, type: 'event' }
+
+              const updateValues = {
+                lastModified: generateTimestamp(),
+                'body.heats': newHeats
+              }
+
+              const options = { new: true }
+
+              //update the Event
+              Data.findOneAndUpdate(conditions, updateValues, options)
+                .then(updateResults => {
+                  const response = {
+                    'event': updateResults._doc,
+                    invalidHeatIDs
+                  }
+                  return callback(null, successResponse(200, response))
+                })
+                .catch(err => callback(null, errorResponse(err.statusCode, 'Error updating the event')))
             })
-            .catch(err => callback(null, errorResponse(err.statusCode, 'Error updating the event')))
+            .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding runners')))
         })
         .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding the event')))
     })
