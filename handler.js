@@ -1,14 +1,35 @@
+'use strict'
 const connectToDatabase = require('./db')
 const Data = require('./Data')
 const Utils = require('./utils')
-/*let generateID = Utils.generateID
-let generateTimestamp = Utils.generateTimestamp*/
 let { generateID, generateTimestamp, isValidObjectID } = Utils
 let sanitize = require('mongo-sanitize')
 
 require('dotenv').config({ path: './variables.env'})
-'use strict';
 
+module.exports.getEvent = (event, context, callback) => {
+  context.callbackWaitsForEmptyEventLoop = false
+
+  connectToDatabase()
+    .then(() => {
+      const { eventID } = event.queryStringParameters
+
+      if(!validID(eventID)) {
+        return callback(null, errorResponse(501, "Invalid event ID"))
+      }
+
+      findEvent(eventID)
+        .then(result => {
+          if(result === null) {
+            return callback(null, errorResponse(501, 'Event does not exist'))
+          }
+
+          return callback(null, successResponse(200, result))
+
+        })
+        .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding event')))
+    })
+}
 
 module.exports.createEvent = (event, context, callback) => {
   context.callbackWaitsForEmptyEventLoop = false
@@ -131,8 +152,7 @@ module.exports.createRunners = (event, context, callback) => {
       }
 
       findEvent(eventID)
-        .then(result => {
-          const resultEvent = result._doc
+        .then(resultEvent => {
           
           let validRunners = [] 
           let invalidRunners = [] 
@@ -224,21 +244,22 @@ module.exports.createRunners = (event, context, callback) => {
                 type: 'event', 
               }
 
-              const options = {new: true}
+              const options = { 
+                new: true, 
+                lean: true 
+              }
               
               //update the Event with the successfully added Runners
               Data.findOneAndUpdate(conditions, updateValues, options)
                 .then(updateResults => {
                   const response = {
                     event: {
-                      ...updateResults._doc
+                      ...updateResults
                     },
-                    runners: {
+                    runners: [
                       ...formattedRunners
-                    },
-                    invalidRunners: {
-                      ...invalidRunners
-                    }
+                    ],
+                    invalidRunners
                   }
                   return callback(null, successResponse(200, response))
                 })
@@ -283,8 +304,7 @@ module.exports.addHeats = (event, context, callback) => {
       }
 
       findEvent(eventID)
-        .then(result => {
-          resultEvent = result._doc
+        .then(resultEvent => {
           let invalidHeats = []
           let validHeats = []
           let eventHeatNames = {}
@@ -353,18 +373,21 @@ module.exports.addHeats = (event, context, callback) => {
             'body.heats': newHeats
           }
 
-          const options = { new: true }
+          const options = { 
+            new: true,
+            lean: true
+          }
           
           //update the Event
           Data.findOneAndUpdate(conditions, updateValues, options)
             .then(updateResults => {
               const response = {
                 event: {
-                  ...updateResults._doc
+                  ...updateResults
                 },
-                heats: {
+                heats: [
                   ...formattedHeats
-                },
+                ],
                 invalidHeats
               }
               return callback(null, successResponse(200, response))
@@ -374,7 +397,6 @@ module.exports.addHeats = (event, context, callback) => {
         .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding the event')))
     })
 }
-
 
 //TODO: check to see if any runners have this heat -> refuse to delete if there are runners under this heat
 module.exports.removeHeats = (event, context, callback) => {
@@ -392,8 +414,7 @@ module.exports.removeHeats = (event, context, callback) => {
 
       //TODO: clean this up. there is a bunch of redundant loops being performed. Could be done more efficiently
       findEvent(eventID)
-        .then(result => {
-          const resultEvent = result._doc
+        .then(resultEvent => {
 
           //find runners and make sure that none of them belong to a heat that is about to be removed
           let runnersToFind = resultEvent.body.runners.map(runner => {
@@ -470,13 +491,17 @@ module.exports.removeHeats = (event, context, callback) => {
                 'body.heats': newHeats
               }
 
-              const options = { new: true }
+              const options = { 
+                new: true,
+                lean: true 
+              }
 
               //update the Event
               Data.findOneAndUpdate(conditions, updateValues, options)
                 .then(updateResults => {
                   const response = {
-                    'event': updateResults._doc,
+                    'event': updateResults,
+                    validHeats,
                     invalidHeatIDs
                   }
                   return callback(null, successResponse(200, response))
@@ -504,8 +529,7 @@ module.exports.addCheckpoints = (event, context, callback) => {
       }
 
       findEvent(eventID)
-        .then(result => {
-          const resultEvent = result._doc
+        .then(resultEvent => {
           let validCheckpoints = []
           let invalidCheckpoints = []
           let eventCheckpointNames = {} //existing checkpoint names
@@ -573,13 +597,16 @@ module.exports.addCheckpoints = (event, context, callback) => {
             'body.checkpoints': newCheckpoints
           }
 
-          const options = { new: true }
+          const options = { 
+            new: true,
+            lean: true
+          }
 
           //update the Event
           Data.findOneAndUpdate(conditions, updateValues, options)
             .then(updateResult => {
               const response = {
-                event: updateResult._doc,
+                event: updateResult,
                 checkpoints: formattedCheckpoints,
                 invalidCheckpoints
               }
@@ -606,8 +633,7 @@ module.exports.removeCheckpoints = (event, context, callback) => {
       }
 
       findEvent(eventID)
-        .then(result => {
-          const resultEvent = result._doc
+        .then(resultEvent => {
           let validCheckpoints = {}
           let invalidCheckpointIDs = []
 
@@ -659,30 +685,26 @@ module.exports.removeCheckpoints = (event, context, callback) => {
             'body.checkpoints': newCheckpoints
           }
 
-          const options = { new: true }
+          const options = { 
+            new: true,
+            lean: true 
+          }
 
           //update the Event
           Data.findOneAndUpdate(conditions, updateValues, options)
             .then(updateResults => {
               const response = {
-                'event': updateResults._doc,
+                'event': updateResults,
                 invalidCheckpointIDs
               }
               return callback(null, successResponse(200, response))
             })
             .catch(err => callback(null, errorResponse(err.statusCode, 'Error updating the event')))
-
         })
         .catch(err => errorResponse(err.statusCode, 'Error finding the event'))
-
     })
 }
 
-//TODO: updateHeats() {} [name, startTime]
-//TODO: deleteRunner() {}
-//TODO: updateRunner() {} [what am I updating? ->name, bib, splits[key]]
-//TODO: removeCheckpoint() {}
-//TODO: updateCheckpoint() {} [name, distance, difficulty, coordinates]
 
 
 /*************** HELPER FUNCTIONS *******************/
@@ -736,7 +758,6 @@ function validID (input) {
   /*if(typeof(input) !== 'string') {
     return false
   }
-  
 
   const regex = /\W/
   return (!regex.test(input))*/
@@ -859,7 +880,10 @@ function successResponse(statusCode, body) {
 //TODO: should this eventually include the lastModified parameter???
 function findEvent(eventID) {
   const eventConditions = { _id: eventID, type: 'event' }
-  return Data.findOne(eventConditions)
+  const select = '_id type lastModified body'
+  const options = { lean: true }
+
+  return Data.findOne(eventConditions, select, options)
 }
 
 //TODO: should this eventually include the lastModified parameter???
@@ -869,5 +893,8 @@ function findRunner(runnerID, eventID) {
     type: 'runner',
     'body.eventID': eventID
   }
-  return Data.findOne(runnerConditions)
+  const select = '_id type lastModified body'
+  const options = { lean: true }
+
+  return Data.findOne(runnerConditions, select, options)
 } 
