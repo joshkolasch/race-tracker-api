@@ -2,7 +2,7 @@
 const connectToDatabase = require('./db')
 const Data = require('./Data')
 const Utils = require('./utils')
-let { generateID, generateTimestamp, isValidObjectID } = Utils
+let { generateID, generateTimestamp, isValidObjectID, convertToObjectID } = Utils
 let sanitize = require('mongo-sanitize')
 
 require('dotenv').config({ path: './variables.env'})
@@ -398,7 +398,6 @@ module.exports.addHeats = (event, context, callback) => {
     })
 }
 
-//TODO: check to see if any runners have this heat -> refuse to delete if there are runners under this heat
 module.exports.removeHeats = (event, context, callback) => {
   context.callbackWaitsForEmptyEventLoop = false
 
@@ -415,24 +414,19 @@ module.exports.removeHeats = (event, context, callback) => {
       //TODO: clean this up. there is a bunch of redundant loops being performed. Could be done more efficiently
       findEvent(eventID)
         .then(resultEvent => {
-
           //find runners and make sure that none of them belong to a heat that is about to be removed
           let runnersToFind = resultEvent.body.runners.map(runner => {
-            const conditions = {
-              _id: runner._id,
-              type: 'runner'
-            }
-            //TODO: this is a good opportunity to use the Select option and only return the 'runner.body.heat' field
-            return Data.findOne(conditions)
+            const select = 'body.heat'
+            return findRunner(eventID, runner._id, select)
           })
 
           Promise.all(runnersToFind)
-            .then(foundRunners => {
+            .then(foundRunnerHeats => {
               let eventHeats = {} //heats that runners currently belong to
               let validHeats = {}
               let invalidHeatIDs = []
 
-              foundRunners.forEach(runner => {
+              foundRunnerHeats.forEach(runner => {
                 eventHeats[runner.body.heat] = 1
               })
               
@@ -705,7 +699,274 @@ module.exports.removeCheckpoints = (event, context, callback) => {
     })
 }
 
+/*
+ROAD MAP for ADDSPLITS
+-find event
+for (runner in userInput)
+  -validate 
+    ->return validRunners
+-find runners
+for (runner in validRunners)
+  for(split in validRunners.splits)
+    -validate splits 
+    -prep splits to be updated
+      ->return update Query
+run all of the update queries
+*/
 
+//This is the most difficult API call to read and debug. Find a better way!!!
+//Way too convoluted -> try to simplify logic
+//TODO check to see if heatTime starts before splitTime
+module.exports.addSplits = (event, context, callback) => {
+  context.callbackWaitsForEmptyEventLoop = false
+
+  connectToDatabase()
+    .then(() => {
+      const { eventID, runners } = JSON.parse(event.body)
+
+      if(!validID(eventID)) {
+        return callback(null, errorResponse(501, 'Invalid event ID'))
+      }
+
+      findEvent(eventID)
+        .then(resultEvent => {
+          if(resultEvent == null) {
+            return callback(null, errorResponse(400, 'Event does not exist'))
+          }
+          let invalidRunners = []
+          let validRunners = {}
+
+          if(resultEvent.body.runners.length < 1) {
+            return callback(null, errorResponse(501, 'Event does not have any runners'))
+          }
+          let eventRunners = {}
+          resultEvent.body.runners.forEach(runner => {
+            eventRunners[runner._id] = 1
+          })
+
+          //verify runners
+          runners.forEach(runner => {
+            if(!validID(runner._id)) {
+              invalidRunners.push({
+                runner,
+                errMessage: 'Invalid runner ID'
+              })
+            }
+            else if(!resultEvent.body.heats.hasOwnProperty(runner.heatID)) {
+              invalidRunners.push({
+                runner,
+                errMessage: 'Runners heat does not exist in the event'
+              })
+            }
+            else if(!eventRunners.hasOwnProperty(runner._id)) {
+              invalidRunners.push({
+                runner,
+                errMessage: 'Runner does not exist in event'
+              })
+            }
+            else if(validRunners.hasOwnProperty(runner._id)) {
+              invalidRunners.push({
+                runner,
+                errMessage: 'User submitted duplicate runners'
+              })
+            }
+            else {
+              validRunners[runner._id] = {
+                lastModified: runner.lastModified,
+                splits: runner.splits
+              }
+            }
+          })
+
+          //are there any verified runners? If not, return
+          if(Object.keys(validRunners).length < 1) {
+            const response = {
+              invalidRunners,
+              errMessage: 'No valid runners'
+            }
+            return callback(null, errorResponse(501, response))
+          }
+
+          //prepare to find the verfied runners
+          let runnersToFind = Object.keys(validRunners).map(runnerID => {
+            const select = '_id lastModified body.splits'
+            return findRunner(eventID, runnerID, select)
+          })
+
+          //find verified runners
+          Promise.all(runnersToFind)
+            .then(foundRunners => {
+              let invalidSplits = []
+              let runnersToUpdate = []
+
+              //verify the runners from user input matches the runner data from the database
+              foundRunners.forEach(runner => {
+                //NOTE: this shouldn't happen!
+                //this would imply that the runner no longer exists, but the event still has its key
+                //this should trigger the App to getEvent() to update
+                if(runner === null) {
+                  invalidRunners.push({
+                    errMessage: 'Unable to find runner in database'
+                  })
+                }
+                else if(runner.lastModified !== validRunners[runner._id].lastModified) {
+                  invalidRunners.push({
+                    runner,
+                    errMessage: 'Runner has been modified by another user'
+                  })
+                }
+                //sort out the valid splits from the invalid splits for this particular runner
+                else {
+                  let splitsToUpdate = {} //will contain all of the valid splits for this runner
+                  
+                  validRunners[runner._id].splits.forEach(key => {
+                    if(!validID(key.checkpointID)) {
+                      invalidSplits.push({
+                        runner: runner._id,
+                        split: key,
+                        errMessage: 'Invalid split ID'
+                      })
+                    }
+                    else if(!validSplitTime(key.splitTime)) {
+                      invalidSplits.push({
+                        runner: runner._id,
+                        split: key,
+                        errMessage: 'Invalid split time'
+                      })
+                    }
+                    else if(runner.body.splits.hasOwnProperty(key.checkpointID)) {
+                      invalidSplits.push({
+                        runner,
+                        split: key,
+                        errMessage: 'A split already exists for that checkpoint'
+                      })
+                    }
+                    else if(!resultEvent.body.checkpoints.hasOwnProperty(key.checkpointID)) {
+                      invalidSplits.push({
+                        runner,
+                        split: key,
+                        errMessage: 'Checkpoint does not exist in the event'
+                      })
+                    }
+                    else {
+                      splitsToUpdate[key.checkpointID] = key.splitTime
+                    }
+                  })
+
+                  //put all of the valid splits in an object to update the database
+                  if(Object.keys(splitsToUpdate).length > 0) {
+                    const conditions = {
+                      _id: runner._id
+                    }
+                    const updateValues = {
+                      lastModified: generateTimestamp(),
+                      'body.splits': {
+                        ...runner.body.splits,
+                        ...splitsToUpdate
+                      }
+                    }
+                    const options = {
+                      new: true
+                    }
+
+                    runnersToUpdate.push(
+                      Data.findOneAndUpdate(conditions, updateValues, options)
+                    )
+                  }
+                }
+              })
+
+              
+              //if there are no valid splits to update, return
+              if(runnersToUpdate.length < 1) {
+                const response = {
+                  invalidRunners,
+                  invalidSplits,
+                  errMessage: 'No valid splits to update'
+                }
+                return callback(null, errorResponse(501, response))
+              }
+
+              //update runners
+              Promise.all(runnersToUpdate)
+                .then(updateResults => {
+                  const response = {
+                    updatedRunners: updateResults,
+                    invalidRunners,
+                    invalidSplits
+                  }
+                  return callback(null, successResponse(200, response))
+                })
+                .catch(err => callback(null, errorResponse(err.statusCode, 'Error updating runners')))
+            })
+            .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding runners')))
+        })
+        .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding event')))
+    })
+}
+
+module.exports.startHeat = (event, context, callback) => {
+  context.callbackWaitsForEmptyEventLoop = false
+
+  connectToDatabase()
+    .then(() => {
+      const { eventID, heatID, startTime } = JSON.parse(event.body)
+
+      if(!validID(eventID)) {
+        return callback(null, errorResponse(501, 'Invalid event ID'))
+      }
+      if(!validID(heatID)) {
+        return callback(null, errorResponse(501, 'Invalid heat ID'))
+      }
+      if(!validSplitTime(startTime)) {
+        return callback(null, errorResponse(501, 'Invalid start time'))
+      }
+
+      findEvent(eventID)
+        .then(resultEvent => {
+          
+          if(resultEvent === null) {
+            return callback(null, errorResponse(401, 'Event does not exist'))
+          }
+          if(!resultEvent.body.heats.hasOwnProperty(heatID)) {
+            return callback(null, errorResponse(401, 'This heat does not exist in the event'))
+          }
+          if(resultEvent.body.heats[heatID].startTime !== null) {
+            return callback(null, errorResponse(401, 'Heat has already started'))
+          }
+          
+          const conditions = {
+            _id: eventID
+          }
+
+          //TODO: is there a better way to update the single item without having to replace the entire object???
+          const updateValues = {
+            ...resultEvent,
+            lastModified: generateTimestamp(),
+            body: {
+              ...resultEvent.body,
+              heats: {
+                ...resultEvent.body.heats,
+                [heatID]: {
+                  ...resultEvent.body.heats[heatID],
+                  startTime
+                }
+              }
+            }
+          }
+
+          const options = {
+            new: true,
+            lean: true
+          }
+
+          Data.findOneAndUpdate(conditions, updateValues, options)
+            .then(updateResult => callback(null, successResponse(200, updateResult)))
+            .catch(err => callback(null, errorResponse(err.statusCode, 'Error updating heat')))
+        })
+        .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding event')))
+    })
+}
 
 /*************** HELPER FUNCTIONS *******************/
 
@@ -721,6 +982,24 @@ function validString (input) {
     return false
   }
   if (input.indexOf('$') !== NOT_FOUND) {
+    return false
+  }
+  return true
+}
+
+function validSplitTime(splitTime) {
+  if(!validNumber) {
+    return false
+  }
+  return true
+}
+
+function validNumber(input) {
+  if(typeof(input) !== 'number') {
+    return false
+  }
+  //captures NaN
+  if(input !== input) {
     return false
   }
   return true
@@ -878,6 +1157,8 @@ function successResponse(statusCode, body) {
 }
 
 //TODO: should this eventually include the lastModified parameter???
+//TODO: put the select as an input parameter (then fix all of the functions that call this)
+//->findEvent(eventID, select)  --> then remove (const select...)
 function findEvent(eventID) {
   const eventConditions = { _id: eventID, type: 'event' }
   const select = '_id type lastModified body'
@@ -887,13 +1168,14 @@ function findEvent(eventID) {
 }
 
 //TODO: should this eventually include the lastModified parameter???
-function findRunner(runnerID, eventID) {
+//NOTE: nested ObjectId's need to be converted for the comparison to work!
+function findRunner(eventID, runnerID, select) {
   const runnerConditions = { 
     _id: runnerID, 
     type: 'runner',
-    'body.eventID': eventID
+    'body.eventID': convertToObjectID(eventID)
   }
-  const select = '_id type lastModified body'
+
   const options = { lean: true }
 
   return Data.findOne(runnerConditions, select, options)

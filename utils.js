@@ -12,5 +12,9 @@ module.exports =
 
   isValidObjectID: function (id) {
     return mongoose.Types.ObjectId.isValid(id)
+  },
+
+  convertToObjectID: function (id) {
+    return mongoose.Types.ObjectId(id)
   }
 }

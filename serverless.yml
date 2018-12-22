@@ -91,6 +91,22 @@ functions:
           path: data/event/checkpoints/remove
           method: put
           cors: true
+
+  addSplits:
+    handler: handler.addSplits
+    events:
+      - http:
+          path: data/runner/splits/add
+          method: put
+          cors: true
     
+  startHeat:
+    handler: handler.startHeat
+    events:
+      - http:
+          path: data/event/heats/start
+          method: put
+          cors: true
+          
 plugins:
 - serverless-offline # adding the plugin to be able to run the offline emulation
