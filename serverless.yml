@@ -3,7 +3,7 @@ service: race-tracker-api
 
 provider:
   name: aws
-  runtime: nodejs8.10
+  runtime: nodejs8.10 
   memorySize: 128 # set the maximum memory of the Lambdas in Megabytes
   timeout: 10 # the timeout is 10 seconds (default is 6 seconds)
   stage: dev # setting the env stage to dev, this will be visible in the routes
@@ -24,8 +24,16 @@ functions:
     handler: handler.createEvent # point to exported create function in handler.js
     events:
       - http:
-          path: data/event # path will be domain.name.com/dev/notes
+          path: data/event 
           method: post
+          cors: true
+
+  deleteEvent:
+    handler: handler.deleteEvent
+    events:
+      - http:
+          path: data/event/
+          method: delete
           cors: true
 
   getRunners:
@@ -42,6 +50,15 @@ functions:
       - http:
           path: data/runners
           method: post
+          cors: true
+
+  #updates event, then removes runners from database
+  removeRunners:
+    handler: handler.deleteRunners
+    events: 
+      - http:   
+          path: data/runners
+          method: put
           cors: true
 
   getAll:

@@ -56,6 +56,50 @@ module.exports.createEvent = (event, context, callback) => {
     })
 }
 
+//NOTE: this should be reserved for admins!!
+//TODO: try it out
+//TODO: test with event with 0 runners
+module.exports.deleteEvent = (event, context, callback) => {
+  context.callbackWaitsForEmptyEventLoop = false;
+
+  connectToDatabase()
+    .then(() => {
+      const { eventID, lastModified } = event.queryStringParameters
+
+      if(!validID(eventID)) {
+        return callback(null, errorResponse(501, 'Invalid event ID'))
+      }
+      if(!validNumber(lastModified)) {
+        return callback(null, errorResponse(501, 'Last modified is invalid'))
+      }
+
+      findEvent(eventID)
+        .then(resultEvent => {
+          if(resultEvent.lastModified !== lastModified) {
+            return callback(null, errorResponse(501, 'Last modified does not match'))
+          }
+
+          let deleteEvent = Data.deleteOne({_id:eventID, type: 'event'})
+
+          //also delete the event's runners
+          let runnersToDelete = resultEvent.body.runners.map(runner => {
+            const conditions = {
+              _id: runner._id,
+              type: 'runner'
+            }
+            return Data.deleteOne(conditions)
+          })
+
+          Promise.all([deleteEvent, ...runnersToDelete])
+            .then(deleteResults => {
+              return callback(null, successResponse(200, deleteResults))
+            })
+            .catch(err, callback(null, errorResponse(err.statusCode, 'Error deleting event')))
+        })
+        .catch(err => callback(null, errorResponse(err.statusCode, 'Error looking for event')))
+    })
+}
+
 module.exports.getRunners = (event, context, callback) => {
   context.callbackWaitsForEmptyEventLoop = false
 
@@ -268,6 +312,85 @@ module.exports.createRunners = (event, context, callback) => {
             .catch(err => callback(null, errorResponse(err.statusCode, 'Error adding runners')))
         })
         .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding the event')))
+    })
+}
+
+//TODO: figure out a better verification method than just checking the eventID and its lastModified parameter
+//Is there a way to use authentication to verify that users are asking for their data and not someone else's???
+module.exports.removeRunners = (event, context, callback) => {
+  context.callbackWaitsForEmptyEventLoop = false
+
+  connectToDatabase()
+    .then(() => {
+      //TODO: try using 'let' for runners and later .filter() all of the invalid runners
+      //this should reduce the memory complexity by O(n)
+      const { eventID, runners } = JSON.parse(event.body)
+
+      if(!validID(eventID)) {
+        return callback(null, errorResponse(501, 'Invalid eventID'))
+      }
+      //TODO: make sure that this works if nothing is passed,
+      if(!(runners instanceof Array)) {
+        return callback(null, errorResponse(501, 'Invalid runners array'))
+      }
+      if(runners.length < 1) {
+        return callback(null, errorResponse(501, 'Runners array is empty'))
+      }
+      
+      findEvent(eventID)
+        .then(resultEvent => {
+          if(resultEvent === null) {
+            return callback(null, errorResponse(401, 'Event does not exist'))
+          }
+/*
+          let removeRunners = {}
+          let runnersToRemove = []
+
+          runners.forEach(runner => {
+            if(validID(runner._id) && validNumber(runner.lastModified)) {
+              removeRunners[runner._id] = runner.lastModified
+            }
+          })
+*/
+          let runnersToRemove = []
+          let eventRunners = {}
+          let runnersToFilter = {}
+
+          resultEvent.body.runners.forEach(runner => {
+            eventRunners[runner._id] = 1
+          })
+
+          runners.forEach(runner => {
+            if(validID(runner._id) && validNumber(runner.lastModified) && eventRunners.hasOwnProperty(runner._id)) {
+              const conditions = {
+                _id: runner._id,
+                type: 'runner'
+              }
+
+              runnersToRemove.push(Data.deleteOne(conditions))
+              runnersToFilter[runner._id] = runner.lastModified
+            }
+          })
+
+          let conditions = {
+            _id: eventID,
+            type: 'event'
+          }
+
+          let updateValues = {
+            lastModified: generateTimestamp(),
+            'body.runners': resultEvent.body.runners.filter(runner => !runnersToFilter.hasOwnProperty(runner._id))
+          }
+
+          let updateEvent = Data.findOneAndUpdate(conditions, updateValues)
+
+          Promise.all([updateEvent, ...runnersToRemove])
+            .then(updateResults => {
+              return callback(null, successResponse(200, updateResults))
+            })
+            .catch(err => callback(null, errorResponse(err.statusCode, 'Error removing runners')))
+        })
+        .catch(err => callback(null, errorResponse(err.statusCode, 'Error finding event')))
     })
 }
 
@@ -988,7 +1111,7 @@ function validString (input) {
 }
 
 function validSplitTime(splitTime) {
-  if(!validNumber) {
+  if(!validNumber(splitTime)) {
     return false
   }
   return true
